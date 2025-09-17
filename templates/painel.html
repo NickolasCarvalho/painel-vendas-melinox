@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Painel de Vendas Melinox</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <style>
+        body { background-color: #004d80; color: white; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; margin: 0; height: 100vh; display: flex; flex-direction: column; justify-content: space-between; align-items: center; overflow-y: auto; }
+        .main-container { width: 100%; flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
+        
+        /* Celebração em Tela Cheia */
+        #celebration-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0, 0, 0, 0.75); z-index: 1000; flex-direction: column; justify-content: center; align-items: center; opacity: 0; transition: opacity 0.5s ease-in-out; }
+        #celebration-overlay.active { display: flex; opacity: 1; }
+        
+        @keyframes rainbow-text {
+            0%{color: #ff0000;} 15%{color: #ff7f00;} 30%{color: #ffff00;} 45%{color: #00ff00;} 60%{color: #0000ff;} 75%{color: #4b0082;} 90%{color: #8b00ff;} 100%{color: #ff0000;}
+        }
+        #info-vendedor { font-size: 8em; font-weight: 900; text-transform: uppercase; animation: rainbow-text 3s linear infinite; text-shadow: 0 0 15px rgba(0,0,0,0.7); }
+        #info-valor { font-size: 6em; font-weight: 700; color: #00ff7f; margin-top: -10px; text-shadow: 0 0 10px rgba(0,0,0,0.5); }
+        #info-label { font-size: 3em; font-weight: 500; color: #ffffff; margin-top: 10px; letter-spacing: 2px; }
+
+        /* Gráficos de Meta */
+        .charts-container { width: 100%; max-width: 1200px; margin-bottom: 30px; }
+        .chart-card { background-color: rgba(0, 0, 0, 0.2); border-radius: 10px; padding: 15px 20px; margin-bottom: 15px; text-align: left; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 1.2em; }
+        .chart-title { font-weight: bold; }
+        .chart-conversion { font-size: 0.9em; opacity: 0.8; }
+        .progress-bar-container { background-color: rgba(255, 255, 255, 0.2); border-radius: 25px; width: 100%; height: 30px; position: relative; overflow: hidden; }
+        
+        /* <<<< AQUI ESTÁ A MUDANÇA >>>> */
+        .progress-bar {
+            background: linear-gradient(90deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #8b00ff, #ff0000);
+            background-size: 400% 400%;
+            animation: rainbow-progress 5s linear infinite;
+            height: 100%;
+            width: 0%;
+            border-radius: 25px;
+            transition: width 0.5s ease-in-out;
+        }
+        /* Animação que move o gradiente de cores */
+        @keyframes rainbow-progress {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        .progress-bar-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1em; text-shadow: 1px 1px 2px rgba(0,0,0,0.7); }
+
+        /* Métricas na Base */
+        .metrics-container { display: flex; justify-content: space-evenly; width: 100%; padding: 15px 20px; background-color: rgba(0, 0, 0, 0.3); border-top: 2px solid #fff; box-sizing: border-box; }
+        .metric-item { display: flex; flex-direction: column; align-items: center; font-size: 1em; }
+        .metric-icon { font-size: 1.8em; margin-bottom: 5px; }
+        .metric-value { font-size: 1.5em; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="charts-container">
+            <div id="salespeople-charts"></div>
+        </div>
+    </div>
+
+    <div id="celebration-overlay">
+        <div id="info-vendedor"></div>
+        <div id="info-valor"></div>
+        <div id="info-label">NOVO GANHO!</div>
+    </div>
+
+    <div class="metrics-container">
+        <div class="metric-item"><i class="fas fa-sack-dollar metric-icon"></i> <span>Negócios Ganhos</span><span class="metric-value" id="total-ganhos">0</span></div>
+        <div class="metric-item"><i class="fas fa-chart-line metric-icon"></i> <span>Faturamento Total</span><span class="metric-value" id="faturamento">R$ 0,00</span></div>
+        <div class="metric-item"><i class="fas fa-ticket-alt metric-icon"></i> <span>Ticket Médio</span><span class="metric-value" id="ticket-medio">R$ 0,00</span></div>
+    </div>
+
+    <audio id="som-vitoria" src="/static/som.mp3" preload="auto"></audio>
+
+    <script>
+        // Elementos da barra inferior
+        const totalGanhosSpan = document.getElementById('total-ganhos');
+        const faturamentoSpan = document.getElementById('faturamento');
+        const ticketMedioSpan = document.getElementById('ticket-medio');
+        
+        // Elementos da Celebração
+        const celebrationOverlay = document.getElementById('celebration-overlay');
+        const infoVendedorSpan = document.getElementById('info-vendedor');
+        const infoValorSpan = document.getElementById('info-valor');
+        const somVitoria = document.getElementById('som-vitoria');
+        let isCelebrating = false;
+        
+        // Elementos dos gráficos
+        const salespeopleChartsDiv = document.getElementById('salespeople-charts');
+
+        function formatCurrency(value) {
+            return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        
+        function triggerConfetti() {
+            const duration = 8 * 1000;
+            const animationEnd = Date.now() + duration;
+            const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 1001 };
+
+            function randomInRange(min, max) { return Math.random() * (max - min) + min; }
+
+            const interval = setInterval(function() {
+                const timeLeft = animationEnd - Date.now();
+                if (timeLeft <= 0) { return clearInterval(interval); }
+                const particleCount = 50 * (timeLeft / duration);
+                confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+                confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+            }, 250);
+        }
+
+        function fetchDeal() {
+            if (isCelebrating) return;
+            fetch('/check_deal?cache=' + new Date().getTime())
+                .then(response => response.json())
+                .then(data => {
+                    if (Object.keys(data).length > 0) {
+                        isCelebrating = true;
+                        infoVendedorSpan.innerText = data.vendedor;
+                        infoValorSpan.innerText = formatCurrency(data.valor);
+                        celebrationOverlay.classList.add('active');
+                        somVitoria.play().catch(e => console.log("Áudio bloqueado pelo navegador."));
+                        triggerConfetti();
+                        fetchMetrics(); 
+                        setTimeout(() => {
+                            celebrationOverlay.classList.remove('active');
+                            setTimeout(() => { isCelebrating = false; }, 500);
+                        }, 8000);
+                    }
+                })
+                .catch(error => console.error('Erro ao buscar dados do negócio:', error));
+        }
+
+        function fetchMetrics() {
+            const url = '/get_metrics?cache=' + new Date().getTime();
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    totalGanhosSpan.innerText = data.total_won_deals;
+                    faturamentoSpan.innerText = formatCurrency(data.total_value);
+                    ticketMedioSpan.innerText = formatCurrency(data.average_ticket);
+
+                    salespeopleChartsDiv.innerHTML = '';
+                    if (data.salespeople_performance) {
+                        data.salespeople_performance.forEach(person => {
+                            const personCard = document.createElement('div');
+                            personCard.className = 'chart-card';
+                            personCard.innerHTML = `
+                                <div class="chart-header">
+                                    <span class="chart-title">${person.name}</span>
+                                    <span class="chart-conversion">Conversão: ${person.conversion_rate.toFixed(1)}%</span>
+                                </div>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar" style="width: ${Math.min(person.goal_percentage, 100)}%;"></div>
+                                    <div class="progress-bar-text">${person.goal_percentage.toFixed(1)}%</div>
+                                </div>
+                            `;
+                            salespeopleChartsDiv.appendChild(personCard);
+                        });
+                    }
+                })
+                .catch(error => console.error('Erro ao buscar métricas:', error));
+        }
+        
+        window.addEventListener('load', () => {
+            fetchMetrics();
+            setInterval(fetchDeal, 3000);
+            setInterval(fetchMetrics, 30000);
+        });
+    </script>
+</body>
+</html>
