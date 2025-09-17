@@ -29,6 +29,8 @@ API_URL = 'https://api.agendor.com.br/v3'
 HEADERS = {'Authorization': f'Token {AGENDOR_API_TOKEN}', 'Content-Type': 'application/json'}
 SAO_PAULO_TZ = pytz.timezone('America/Sao_Paulo')
 
+# ... (Todas as suas funções como 'fetch_agendor_data', 'calculate_and_update_metrics', etc. continuam aqui, sem nenhuma mudança) ...
+
 def fetch_agendor_data():
     """Busca o negócio ganho mais recente e força a atualização das métricas."""
     global last_deal_id, latest_deal_info
@@ -151,22 +153,20 @@ def check_deal():
 def get_metrics():
     return jsonify(metrics_data)
 
-if __name__ == '__main__':
-    print(">>> Servidor em inicialização...")
-    try:
-        import pytz
-        from dateutil.parser import isoparse
-    except ImportError:
-        import subprocess, sys
-        print("Instalando dependências (pytz, python-dateutil)...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pytz", "python-dateutil"])
 
-    print(">>> Realizando a primeira carga de métricas...")
-    calculate_and_update_metrics()
-    
-    print(">>> Carga inicial completa. Iniciando threads de fundo.")
-    threading.Thread(target=fetch_agendor_data, daemon=True).start()
-    threading.Thread(target=metrics_update_scheduler, daemon=True).start()
-    
-    print(f">>> SERVIDOR PRONTO. Acessível em http://localhost:2112")
+# --- INICIALIZAÇÃO DA APLICAÇÃO (A PARTE CORRIGIDA) ---
+# Esta parte agora roda sempre, seja no seu PC ou no servidor do Render.
+print(">>> Realizando a primeira carga de métricas...")
+calculate_and_update_metrics()
+
+print(">>> Carga inicial completa. Iniciando threads de fundo.")
+threading.Thread(target=fetch_agendor_data, daemon=True).start()
+threading.Thread(target=metrics_update_scheduler, daemon=True).start()
+print(">>> Threads de fundo iniciadas.")
+
+
+# Este bloco agora só serve para rodar o servidor de testes no SEU computador.
+# O Render vai ignorar esta parte e usar o comando "waitress-serve".
+if __name__ == '__main__':
+    print(f">>> SERVIDOR DE TESTE PRONTO. Acessível em http://localhost:2112")
     app.run(host='0.0.0.0', port=2112, debug=False)
