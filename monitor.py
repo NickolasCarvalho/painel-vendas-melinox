@@ -10,16 +10,22 @@ import pytz
 app = Flask(__name__)
 
 # --- CONFIGURAÇÕES ---
+# AGORA, ESTE É O ÚNICO LUGAR QUE VOCÊ PRECISA MEXER NO FUTURO
+# -----------------------------------------------------------------
 AGENDOR_API_TOKEN = '8098628e-9312-445d-8534-eed86db7a36e'
-# V-- METAS E VENDEDORES ATUALIZADOS AQUI --V
+
 SALES_GOALS = {
     'Michelly': 82000,
-    'Miguel': 82000,  # Meta do Miguel atualizada
+    'Miguel': 82000,
     'Alisson': 50000,
     'Jaqueline': 50000,
-    'Larissa': 50000   # Nova funcionária adicionada
+    'Larissa': 50000
 }
-VALID_SALESPEOPLE = ['Michelly', 'Miguel', 'Alisson', 'Jaqueline', 'Larissa']
+
+# A lista de vendedores válidos agora é gerada automaticamente a partir das metas.
+# Não precisa mais mexer aqui!
+VALID_SALESPEOPLE = list(SALES_GOALS.keys())
+# -----------------------------------------------------------------
 # --- FIM DAS CONFIGURAÇÕES ---
 
 # --- Variáveis Globais ---
@@ -153,22 +159,17 @@ def check_deal():
 def get_metrics():
     return jsonify(metrics_data)
 
-if __name__ == '__main__':
-    print(">>> Servidor em inicialização...")
-    try:
-        import pytz
-        from dateutil.parser import isoparse
-    except ImportError:
-        import subprocess, sys
-        print("Instalando dependências (pytz, python-dateutil)...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pytz", "python-dateutil"])
 
-    print(">>> Realizando a primeira carga de métricas...")
-    calculate_and_update_metrics()
-    
-    print(">>> Carga inicial completa. Iniciando threads de fundo.")
-    threading.Thread(target=fetch_agendor_data, daemon=True).start()
-    threading.Thread(target=metrics_update_scheduler, daemon=True).start()
-    
+# --- INICIALIZAÇÃO DA APLICAÇÃO ---
+print(">>> Realizando a primeira carga de métricas...")
+calculate_and_update_metrics()
+
+print(">>> Carga inicial completa. Iniciando threads de fundo.")
+threading.Thread(target=fetch_agendor_data, daemon=True).start()
+threading.Thread(target=metrics_update_scheduler, daemon=True).start()
+print(">>> Threads de fundo iniciadas.")
+
+
+if __name__ == '__main__':
     print(f">>> SERVIDOR DE TESTE PRONTO. Acessível em http://localhost:2112")
     app.run(host='0.0.0.0', port=2112, debug=False)
