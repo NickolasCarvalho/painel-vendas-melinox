@@ -10,10 +10,7 @@ import pytz
 app = Flask(__name__)
 
 # --- CONFIGURAÇÕES ---
-# AGORA, ESTE É O ÚNICO LUGAR QUE VOCÊ PRECISA MEXER NO FUTURO
-# -----------------------------------------------------------------
 AGENDOR_API_TOKEN = '8098628e-9312-445d-8534-eed86db7a36e'
-
 SALES_GOALS = {
     'Michelly': 82000,
     'Miguel': 82000,
@@ -21,11 +18,7 @@ SALES_GOALS = {
     'Jaqueline': 50000,
     'Larissa': 50000
 }
-
-# A lista de vendedores válidos agora é gerada automaticamente a partir das metas.
-# Não precisa mais mexer aqui!
 VALID_SALESPEOPLE = list(SALES_GOALS.keys())
-# -----------------------------------------------------------------
 # --- FIM DAS CONFIGURAÇÕES ---
 
 # --- Variáveis Globais ---
@@ -81,29 +74,19 @@ def fetch_all_items_paginated(endpoint, params):
     return all_items
 
 def calculate_and_update_metrics():
-    """Calcula todas as métricas com base nas regras de negócio definidas."""
+    """Calcula todas as métricas com a nova lógica de conversão."""
     global metrics_data
     with metrics_lock:
         try:
             now_local = datetime.datetime.now(SAO_PAULO_TZ)
             print(f"\n[INFO] Atualizando métricas para {now_local.year}/{now_local.month} (Fuso SP)...")
 
+            # 1. Pega os negócios GANHOS no mês para calcular faturamento e meta
             all_won_deals_ever = fetch_all_items_paginated('deals', {'dealStatus': 2})
+            won_deals_this_month_unfiltered = [d for d in all_won_deals_ever if d.get('wonAt') and isoparse(d['wonAt']).astimezone(SAO_PAULO_TZ).month == now_local.month and isoparse(d['wonAt']).astimezone(SAO_PAULO_TZ).year == now_local.year]
+            won_deals_this_month = [deal for deal in won_deals_this_month_unfiltered if deal.get('owner', {}).get('name') in VALID_SALESPEOPLE]
             
-            won_deals_this_month_unfiltered = []
-            for deal in all_won_deals_ever:
-                won_at_str = deal.get('wonAt')
-                if won_at_str:
-                    won_at_utc = isoparse(won_at_str)
-                    won_at_local = won_at_utc.astimezone(SAO_PAULO_TZ)
-                    if won_at_local.year == now_local.year and won_at_local.month == now_local.month:
-                        won_deals_this_month_unfiltered.append(deal)
-            
-            won_deals_this_month = [
-                deal for deal in won_deals_this_month_unfiltered 
-                if deal.get('owner', {}).get('name') in VALID_SALESPEOPLE
-            ]
-
+            # 2. Pega os negócios CRIADOS no mês (nossa "base" para a conversão)
             start_date_str = now_local.replace(day=1).isoformat()
             last_day = calendar.monthrange(now_local.year, now_local.month)[1]
             end_date_str = now_local.replace(day=last_day).isoformat()
@@ -112,17 +95,31 @@ def calculate_and_update_metrics():
 
             salespeople_performance = []
             for name, goal in SALES_GOALS.items():
-                my_won_deals = [d for d in won_deals_this_month if d.get('owner', {}).get('name') == name]
-                my_leads = [l for l in all_leads_this_month if l.get('owner', {}).get('name') == name]
-                my_total_value = sum(d.get('value', 0) for d in my_won_deals)
-                my_won_count = len(my_won_deals)
-                my_leads_count = len(my_leads)
-                my_conversion_rate = (my_won_count / my_leads_count) * 100 if my_leads_count > 0 else 0
+                # Faturamento e Meta continuam usando os ganhos do mês
+                my_won_deals_for_revenue = [d for d in won_deals_this_month if d.get('owner', {}).get('name') == name]
+                my_total_value = sum(d.get('value', 0) for d in my_won_deals_for_revenue)
                 my_goal_percentage = (my_total_value / goal) * 100 if goal > 0 else 0
+
+                # <<<< AQUI ESTÁ A MUDANÇA NA LÓGICA DE CONVERSÃO >>>>
+                # 1. Pega os leads que o vendedor CRIOU este mês
+                my_leads_this_month = [l for l in all_leads_this_month if l.get('owner', {}).get('name') == name]
+                my_leads_count = len(my_leads_this_month)
+                
+                # 2. DESSES leads, conta quantos já foram ganhos
+                my_converted_deals_from_leads = [l for l in my_leads_this_month if l.get('dealStatus', {}).get('id') == 2]
+                my_converted_count = len(my_converted_deals_from_leads)
+
+                # 3. Calcula a conversão com a nova base
+                my_conversion_rate = (my_converted_count / my_leads_count) * 100 if my_leads_count > 0 else 0
+                # <<<< FIM DA MUDANÇA >>>>
+
                 salespeople_performance.append({
-                    "name": name, "goal_percentage": my_goal_percentage, "conversion_rate": my_conversion_rate,
+                    "name": name,
+                    "goal_percentage": my_goal_percentage,
+                    "conversion_rate": my_conversion_rate,
                 })
 
+            # Métricas gerais continuam como antes
             total_won_deals = len(won_deals_this_month)
             total_value = sum(deal.get('value', 0) for deal in won_deals_this_month if deal.get('value'))
             average_ticket = total_value / total_won_deals if total_won_deals > 0 else 0
@@ -137,6 +134,7 @@ def calculate_and_update_metrics():
         except Exception as e:
             print(f"[ERRO] Falha crítica no cálculo de métricas: {e}")
 
+
 def metrics_update_scheduler():
     while True:
         time.sleep(60)
@@ -145,6 +143,8 @@ def metrics_update_scheduler():
 @app.route('/')
 def home():
     return render_template('painel.html')
+
+# O resto do código continua igual...
 
 @app.route('/check_deal')
 def check_deal():
@@ -159,8 +159,6 @@ def check_deal():
 def get_metrics():
     return jsonify(metrics_data)
 
-
-# --- INICIALIZAÇÃO DA APLICAÇÃO ---
 print(">>> Realizando a primeira carga de métricas...")
 calculate_and_update_metrics()
 
@@ -168,7 +166,6 @@ print(">>> Carga inicial completa. Iniciando threads de fundo.")
 threading.Thread(target=fetch_agendor_data, daemon=True).start()
 threading.Thread(target=metrics_update_scheduler, daemon=True).start()
 print(">>> Threads de fundo iniciadas.")
-
 
 if __name__ == '__main__':
     print(f">>> SERVIDOR DE TESTE PRONTO. Acessível em http://localhost:2112")
