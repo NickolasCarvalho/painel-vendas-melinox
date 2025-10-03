@@ -74,44 +74,44 @@ def fetch_all_items_paginated(endpoint, params):
     return all_items
 
 def calculate_and_update_metrics():
-    """Calcula todas as métricas com a nova lógica de conversão."""
+    """Calcula Faturamento/Meta para o MÊS ATUAL e Conversão para os ÚLTIMOS 30 DIAS."""
     global metrics_data
     with metrics_lock:
         try:
             now_local = datetime.datetime.now(SAO_PAULO_TZ)
-            print(f"\n[INFO] Atualizando métricas para {now_local.year}/{now_local.month} (Fuso SP)...")
+            print(f"\n[INFO] Atualizando métricas (Híbrido: Mês/30 Dias)...")
 
-            # 1. Pega os negócios GANHOS no mês para calcular faturamento e meta
+            # --- LÓGICA PARA FATURAMENTO/META (MÊS CALENDÁRIO) ---
+            print(f"-> Calculando Faturamento para o mês: {now_local.year}/{now_local.month}")
             all_won_deals_ever = fetch_all_items_paginated('deals', {'dealStatus': 2})
-            won_deals_this_month_unfiltered = [d for d in all_won_deals_ever if d.get('wonAt') and isoparse(d['wonAt']).astimezone(SAO_PAULO_TZ).month == now_local.month and isoparse(d['wonAt']).astimezone(SAO_PAULO_TZ).year == now_local.year]
+            won_deals_this_month_unfiltered = [
+                d for d in all_won_deals_ever 
+                if d.get('wonAt') and isoparse(d['wonAt']).astimezone(SAO_PAULO_TZ).month == now_local.month 
+                and isoparse(d['wonAt']).astimezone(SAO_PAULO_TZ).year == now_local.year
+            ]
             won_deals_this_month = [deal for deal in won_deals_this_month_unfiltered if deal.get('owner', {}).get('name') in VALID_SALESPEOPLE]
             
-            # 2. Pega os negócios CRIADOS no mês (nossa "base" para a conversão)
-            start_date_str = now_local.replace(day=1).isoformat()
-            last_day = calendar.monthrange(now_local.year, now_local.month)[1]
-            end_date_str = now_local.replace(day=last_day).isoformat()
-            lead_deals_params = {'createdAtGt': start_date_str, 'createdAtLt': end_date_str}
-            all_leads_this_month = fetch_all_items_paginated('deals', lead_deals_params)
+            # --- LÓGICA PARA TAXA DE CONVERSÃO (ÚLTIMOS 30 DIAS) ---
+            end_date_30d = now_local
+            start_date_30d = end_date_30d - datetime.timedelta(days=30)
+            print(f"-> Calculando Conversão para o período: {start_date_30d.strftime('%d/%m')} a {end_date_30d.strftime('%d/%m')}")
+            lead_deals_params_30d = {'createdAtGt': start_date_30d.isoformat(), 'createdAtLt': end_date_30d.isoformat()}
+            all_leads_last_30_days = fetch_all_items_paginated('deals', lead_deals_params_30d)
 
+            # --- CÁLCULO FINAL (INDIVIDUAL) ---
             salespeople_performance = []
             for name, goal in SALES_GOALS.items():
-                # Faturamento e Meta continuam usando os ganhos do mês
+                # % da Meta usa a base do MÊS ATUAL
                 my_won_deals_for_revenue = [d for d in won_deals_this_month if d.get('owner', {}).get('name') == name]
                 my_total_value = sum(d.get('value', 0) for d in my_won_deals_for_revenue)
                 my_goal_percentage = (my_total_value / goal) * 100 if goal > 0 else 0
 
-                # <<<< AQUI ESTÁ A MUDANÇA NA LÓGICA DE CONVERSÃO >>>>
-                # 1. Pega os leads que o vendedor CRIOU este mês
-                my_leads_this_month = [l for l in all_leads_this_month if l.get('owner', {}).get('name') == name]
-                my_leads_count = len(my_leads_this_month)
-                
-                # 2. DESSES leads, conta quantos já foram ganhos
-                my_converted_deals_from_leads = [l for l in my_leads_this_month if l.get('dealStatus', {}).get('id') == 2]
+                # Taxa de Conversão usa a base dos ÚLTIMOS 30 DIAS
+                my_leads_last_30_days = [l for l in all_leads_last_30_days if l.get('owner', {}).get('name') == name]
+                my_leads_count = len(my_leads_last_30_days)
+                my_converted_deals_from_leads = [l for l in my_leads_last_30_days if l.get('dealStatus', {}).get('id') == 2]
                 my_converted_count = len(my_converted_deals_from_leads)
-
-                # 3. Calcula a conversão com a nova base
                 my_conversion_rate = (my_converted_count / my_leads_count) * 100 if my_leads_count > 0 else 0
-                # <<<< FIM DA MUDANÇA >>>>
 
                 salespeople_performance.append({
                     "name": name,
@@ -119,7 +119,7 @@ def calculate_and_update_metrics():
                     "conversion_rate": my_conversion_rate,
                 })
 
-            # Métricas gerais continuam como antes
+            # Métricas gerais (baseadas no mês, para a barra inferior)
             total_won_deals = len(won_deals_this_month)
             total_value = sum(deal.get('value', 0) for deal in won_deals_this_month if deal.get('value'))
             average_ticket = total_value / total_won_deals if total_won_deals > 0 else 0
@@ -129,22 +129,20 @@ def calculate_and_update_metrics():
                 "average_ticket": average_ticket,
                 "salespeople_performance": sorted(salespeople_performance, key=lambda x: x['goal_percentage'], reverse=True)
             }
-            print(f"[INFO] Métricas atualizadas. Total de ganhos válidos: {total_won_deals}, Faturamento: R$ {total_value:,.2f}")
+            print(f"[INFO] Métricas atualizadas. Faturamento (Mês): R$ {total_value:,.2f}")
 
         except Exception as e:
             print(f"[ERRO] Falha crítica no cálculo de métricas: {e}")
 
-
+# O resto do código continua exatamente o mesmo
 def metrics_update_scheduler():
     while True:
-        time.sleep(60)
+        time.sleep(3600)
         calculate_and_update_metrics()
 
 @app.route('/')
 def home():
     return render_template('painel.html')
-
-# O resto do código continua igual...
 
 @app.route('/check_deal')
 def check_deal():
